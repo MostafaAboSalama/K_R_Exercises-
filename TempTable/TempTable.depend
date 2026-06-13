@@ -1,0 +1,5 @@
+# depslib dependency file v1.0
+1780413291 source:d:\codes\newera\temptable\main.c
+	<stdio.h>
+	<stdlib.h>
+

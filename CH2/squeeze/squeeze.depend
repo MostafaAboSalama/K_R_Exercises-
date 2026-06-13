@@ -1,0 +1,5 @@
+# depslib dependency file v1.0
+1780760416 source:d:\codes\newera\ch2\squeeze\main.c
+	<stdio.h>
+	<stdlib.h>
+

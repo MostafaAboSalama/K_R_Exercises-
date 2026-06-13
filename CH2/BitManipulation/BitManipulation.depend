@@ -1,0 +1,5 @@
+# depslib dependency file v1.0
+1781114625 source:d:\codes\newera\ch2\bitmanipulation\main.c
+	<stdio.h>
+	<stdlib.h>
+

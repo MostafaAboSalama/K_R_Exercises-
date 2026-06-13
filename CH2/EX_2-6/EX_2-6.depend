@@ -1,0 +1,5 @@
+# depslib dependency file v1.0
+1781115229 source:d:\codes\newera\ch2\ex_2-6\main.c
+	<stdio.h>
+	<stdlib.h>
+
