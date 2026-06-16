@@ -1,0 +1,12 @@
+Possible corner cases:
+
+- Empty input (EOF immediately)
+- Input containing only spaces
+- Input containing only tabs
+- Single newline
+- One word
+- Leading/trailing whitespace
+- Multiple consecutive spaces
+- Tabs between words
+- Multiple lines
+- Mixed whitespace (spaces, tabs, newlines)
