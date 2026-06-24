@@ -1,0 +1,29 @@
+/*
+ * Original:
+ *
+ * for(i = 0; i < lim - 1 &&
+ *           (c = getchar()) != '\n' &&
+ *           c != EOF; i++)
+ * {
+ *     s[i] = c;
+ * }
+ *
+ * Rewritten without using && or || in the loop condition.
+ */
+
+for(i = 0; i < lim - 1; i++)
+{
+    /* Read the next character */
+    c = getchar();
+
+    /* Stop if a newline is encountered */
+    if(c == '\n')
+        break;
+
+    /* Stop if end-of-file is encountered */
+    if(c == EOF)
+        break;
+
+    /* Store the character */
+    s[i] = c;
+}
