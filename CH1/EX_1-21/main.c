@@ -1,66 +1,68 @@
 #include <stdio.h>
-#include <stdlib.h>
 
-#define MAX_LEN 100
-#define TAB_STOP    4
+#define TAB_STOP 8
 
-int entab(char str[], int maxLen);
+void entab(void);
 
-int main()
+int main(void)
 {
-    char line[MAX_LEN] = "";
-    int len = 0;
-    while((len = entab(line, MAX_LEN)) > 0)
-    {
-        if(line[0] != '\0')
-            printf("%s", line);
-    }
+    entab();
     return 0;
 }
 
-int entab(char str[], int maxLen)
+/* Replace strings of blanks with the minimum number of tabs and spaces. */
+void entab(void)
 {
-    int c, pos = 0, len = 0, spaceNum = 0, tabNum = 0, column = 0;
-    while((c = getchar()) != EOF && c !='\n')
+    int c;
+    int col = 0;       /* Current output column. */
+    int spaceNum = 0;  /* Number of consecutive buffered spaces. */
+
+    while ((c = getchar()) != EOF)
     {
-        if(pos < maxLen -1)
+        if (c == ' ')
         {
-            if(str[pos] == ' ')
+            /* Buffer spaces until a non-space character is found. */
+            spaceNum++;
+        }
+        else
+        {
+            /* Output buffered spaces using as many tabs as possible. */
+            while (col / TAB_STOP != (col + spaceNum) / TAB_STOP)
             {
-                spaceNum++;
-                if(spaceNum % TAB_STOP == 0)
+                /* A tab moves to the next tab stop. */
+                putchar('\t');
+
+                /* Advance to the next tab stop. */
+                do
                 {
-                    tabNum = TAB_STOP / spaceNum;
-                    spaceNum = 0;
-                    for(int i = 0; i < tabNum; i++)
-                    {
-                        str[pos++] = '\t';
-                        len++;
-                    }
+                    col++;
+                    spaceNum--;
                 }
-                else
-                {
-                    str[pos++] = c;
-                    len++;
-                }
+                while (col % TAB_STOP != 0);
             }
+
+            /* Output any remaining spaces. */
+            while (spaceNum > 0)
+            {
+                putchar(' ');
+                col++;
+                spaceNum--;
+            }
+
+            /* Output the current non-space character. */
+            putchar(c);
+
+            if (c == '\n')
+                col = 0;      /* Start a new line. */
             else
-            {
-                spaceNum = 0;
-                tabNum = 0;
-                if( pos < maxLen - 1)
-                    str[pos++] = c;
-                len++;
-            }
+                col++;
         }
     }
-    if(c == '\n')
-    {
-        if( pos < maxLen - 1)
-            str[pos++] = c;
-        len++;
-    }
 
-    str[pos] = '\0';
-    return len;
+    /* Flush trailing spaces if the input ends with spaces. */
+    while (spaceNum > 0)
+    {
+        putchar(' ');
+        spaceNum--;
+    }
 }
