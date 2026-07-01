@@ -2,11 +2,16 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 
 #define NUMBER      1
 #define MAXOP       100
 #define MAXSTACK    100
 #define MAXBUF      100
+
+
+double lastprinted = 0.0;  /* The "most recently printed value" */
+
 
 /* Stack functions */
 void push(double num);
@@ -25,17 +30,17 @@ int sp = 0;
 char buffer[MAXBUF];
 int bufp = 0;
 
+
 int main(void)
 {
     char s[MAXOP];
     int type;
     double op2;
 
-    while ((type = getop(s)) != EOF) 
+    while ((type = getop(s)) != EOF)
     {
-        switch (type) 
+        switch (type)
         {
-
         case NUMBER:
             push(atof(s));
             break;
@@ -69,8 +74,13 @@ int main(void)
                 printf("Error: division by zero.\n");
             break;
 
+        /* Print and remove the top element. */
         case '\n':
-            printf("\t%.8g\n", pop());
+            if (sp > 0)
+            {
+                lastprinted = pop();
+                printf("\t%.8g\n", lastprinted);
+            }
             break;
 
         default:
@@ -107,20 +117,23 @@ int getop(char s[])
     int c, i = 0;
 
     /* Skip blanks and tabs. */
-    while ((s[0] = c = getch()) == ' ' || c == '\t')
+    while ((c = getch()) == ' ' || c == '\t')
         ;
 
+    s[0] = c;
+    i = 0;
+
+
     /* Handle operators and negative numbers. */
-    if (!isdigit(c) && c != '.') 
+    if (!isdigit(c) && c != '.')
     {
-
-        if (c == '-') 
+        if (c == '-')
         {
-
             /* Look ahead one character. */
-            if (!isdigit(c = getch()) && c != '.') 
+            if (!isdigit(c = getch()) && c != '.')
             {
-                ungetch(c);
+                if (c != EOF)
+                    ungetch(c);
                 return '-';
             }
 
@@ -129,7 +142,6 @@ int getop(char s[])
         }
         else
             return c;
-
     }
 
     /* Collect integer part. */
