@@ -18,7 +18,10 @@ int main(void)
     printf("Enter the substring to search for: ");
     getLine(t, MAXLINE);
 
-
+	/* Remove trailing newline if present */
+	s[strcspn(s, "\n")] = '\0';
+	t[strcspn(t, "\n")] = '\0';
+	
     pos = strrindex(s, t);
 
     if (pos >= 0)
