@@ -1,0 +1,113 @@
+ Pavan Madduri Started a new discussion. Cutting the AI Bottleneck: Multicloud LLM Distribution with CNCF Dragonfly and OCI
+
+How peer-to-peer networking helps solve the 26 TB download problem when scaling large language models across Oracle Kubernetes Engine and multicloud clusters
+The Problem Nobody Budgets For
+
+Your team just fine-tuned a large-parameter model. The SafeTensors checkpoint is well over 100 GB. You need to run it on 200 GPU nodes across your OKE cluster by Monday.
+
+Do the math: a ~130 GB checkpoint times 200 nodes is roughly 26 TB of network transfer from a single model hub. Every node pulls the same large files from Hugging Face or ModelScope independently. Your shared internet egress becomes a chokepoint. Rate limits kick in. Nodes that started downloading at the same time finish hours apart. Your GPU fleet sits idle, burning money while it waits for weights.
+
+This is the ?thundering herd? problem for AI model distribution, and the challenge only grows at scale. Large model checkpoints can range from tens to hundreds of GB depending on precision, quantization, sharding, and repository version. These artifacts are not getting smaller. As enterprises move from single-prompt interactions to multi-step Agentic AI workflows, the infrastructure must spin up inference pods quickly; an autonomous agent cannot wait hours for a model to download before it can execute a task. For agentic AI systems that need to scale inference quickly across tools, regions, or clouds, model distribution becomes part of the reliability architecture.
+
+I kept running into this while building multicloud Kubernetes infrastructure. The usual fixes (NFS mounts, pre-baked container images, object storage mirrors) all have tradeoffs. NFS can become a bottleneck or a single point of failure if it isn’t designed for high availability. Baking models into container images bloats your registry and slows every pull. Object storage mirrors are useful, but they need good sync discipline to avoid serving stale artifacts.
+
+There’s a better approach, and it’s already running in production at Alibaba scale: peer-to-peer distribution.
+What Is CNCF Dragonfly?
+
+Dragonfly is a CNCF graduated project that turns every downloading node into a seed for its peers. It was originally built for container image distribution at Alibaba, where it handles billions of daily requests, and works by splitting large files into small pieces and distributing them across a P2P mesh.
+
+The key idea is that the origin server , whether Hugging Face, ModelScope, or a private OCI bucket, is contacted once by a seed peer. As soon as a single piece lands, it’s immediately available to other nodes in the cluster. Distribution starts in parallel with the initial fetch.
+
+For that ~130 GB model across 200 nodes, in an ideal cache-warmed or preheated scenario, repeated origin downloads can be reduced dramatically, moving moving from roughly 26 TB toward a single origin copy of about 130 GB. Later nodes can download faster and more consistently as more peers cache pieces locally, since each node pulls from many local peers at the same time.
+
+Earlier this year, I contributed native protocol support for Hugging Face (hf://) and ModelScope (modelscope://) directly into the Dragonfly Rust client (PRs #1665 and #1673 in the dragonflyoss/client repository). These backends let Dragonfly understand model hub URLs natively, including authentication, revision pinning, and repository structure, without wrapper scripts or URL rewriting. The CNCF published a walkthrough of this work at https://www.cncf.io/blog/2026/04/06/peer-to-peer-acceleration-for-ai-model-distribution-with-dragonfly/.
+Why This Matters on OCI
+
+OCI has become a capable platform for AI workloads. OKE gives you managed Kubernetes with GPU node pools (A10, A100, H100 shapes), and OCI can offer competitive GPU pricing depending on region, shape, and commitment model. Preemptible instances can make experimentation cheaper still, so check the current OCI Compute pricing for your region and shape.
+
+But the network bottleneck doesn’t care which cloud you’re on. If 50 OKE GPU nodes all pull a ~130 GB model from Hugging Face at the same time, you’re still looking at multiple TB of internet egress, rate limiting, and idle GPUs.
+
+Dragonfly on OKE addresses this with one architectural change: deploy it as a DaemonSet alongside your GPU workloads. The seed peer fetches from the origin once. Every other GPU node pulls pieces from its peers. Peer-to-peer distribution reduces repeated internet-origin downloads and keeps most of the transfer inside the cluster on the fast intra-VCN network.
+Deploying Dragonfly on OKE
+
+There are two parts to a working setup: install Dragonfly, then connect your download path or container runtime to use it. Start with the Helm install:
+
+# Add the Dragonfly Helm repositoryhelm repo add dragonfly https://dragonflyoss.github.io/helm-charts/# Install Dragonfly into your OKE clusterhelm install dragonfly dragonfly/dragonfly \ --namespace dragonfly-system --create-namespace# Verify the DaemonSet is running on your GPU nodeskubectl get pods -n dragonfly-system -o wide
+
+The Helm chart installs the Dragonfly components, but that alone won’t route your pulls through the P2P mesh. You need one more step depending on what you’re accelerating:
+
+    Install the chart (above). This deploys the scheduler, seed peer, and a dfdaemon DaemonSet on your nodes.
+    For model downloads: use dfget, which talks to the local dfdaemon directly. No container runtime changes are needed.
+    For container image pulls: point containerd at dfdaemon as a registry mirror so image pulls traverse the P2P path.
+
+For the image-pull case, the containerd mirror configuration on each node looks roughly like this:
+
+# /etc/containerd/certs.d/<registry-host>/hosts.tomlserver="https://<registry-host>"[host."http://127.0.0.1:65001"] capabilities=["pull","resolve"]
+
+Here, 127.0.0.1:65001 is the local dfdaemon proxy. Restart containerd after applying it. Plan for this step before expecting cluster-wide acceleration.
+
+With that in place, every node joins the P2P mesh. For models, pull directly with the native protocols:
+
+# Download DeepSeek-R1 with P2P acceleration across all nodesdfget hf://deepseek-ai/DeepSeek-R1 -O /models/DeepSeek-R1/ -r# Or from ModelScope for Chinese-origin modelsdfget modelscope://qwen/Qwen-7B -O /models/qwen/ -r# Pin a specific model version for reproducibilitydfget hf://meta-llama/Llama-3.1-70B --hf-revision v2.0 \ -O /models/llama3/ -r--hf-token=$HF_TOKEN
+
+Note: the hf:// and modelscope:// examples require a Dragonfly client and Helm chart version that includes these protocol backends. Confirm that your installed version includes Hugging Face and ModelScope support before relying on these commands.
+The Multicloud Angle
+
+The real payoff shows up in multicloud setups.
+
+Here’s a common pattern: training happens on AWS (that’s where the data lake is), but inference runs on OKE (better GPU pricing). That 130 GB model needs to move between clouds. The usual approach is to push it to S3 and then pull it from S3 into each OKE node. Because every node downloads independently, repeated pulls from each OKE node can increase cross-cloud egress and network overhead.
+
+With Dragonfly deployed in both clusters, the seed peer in your OKE cluster pulls the model once from the origin (or from an OCI Object Storage mirror). The other 49 GPU nodes pull from each other. This keeps cross-cloud egress closer to a single copy and shifts the remaining transfer inside the cluster.
+
+Same story when you’re pulling from multiple hubs. Maybe your team uses Llama from Hugging Face and Qwen from ModelScope. Since both protocols are built into Dragonfly, the same P2P mesh and caching layer handles both:
+
+# Same cluster, different model hubs, same P2P meshdfget hf://meta-llama/Llama-3.1-8B -O /models/llama/ -rdfget modelscope://qwen/Qwen2-7B -O /models/qwen/ -r
+
+That’s one distribution layer handling multiple origins, with no extra operational overhead.
+Integrating with OCI Services
+
+For production on OCI, a few integrations make the architecture tighter:
+
+OCI Object Storage as a mirror. In restricted-network or regulated environments, you can seed Dragonfly from a private Object Storage bucket instead of the public internet. Specify the access pattern up front: Dragonfly can pull over HTTPS using a pre-authenticated request (PAR), through a service gateway for private access without traversing the internet, or via the S3-compatible endpoint. Upload model artifacts once, and Dragonfly distributes them across the cluster via P2P.
+
+OCIR for model-serving containers. Dragonfly can also speed up container image pulls from OCI Container Registry. Your vLLM or Triton inference server images, which can easily exceed 15 GB with CUDA libraries and are typically built as multi-stage Docker images to keep the CVE surface small, can get the same P2P treatment. This is not automatic: you configure your container runtime to route OCIR pulls through Dragonfly’s registry mirror/proxy, after which the image layers are distributed peer-to-peer.
+
+OCI Monitoring for visibility. Dragonfly exposes Prometheus metrics for P2P transfer rates, cache hit ratios, and peer counts. Those metrics can be scraped by Prometheus/Grafana on OKE, and selected metrics can be forwarded into OCI Monitoring through a custom metric ingestion path if you want them alongside your other OCI telemetry.
+Practical Lessons from Production
+
+A few things I’ve picked up running this in practice:
+
+Seed peer placement matters. Put your Dragonfly seed peer on a node with strong internet bandwidth, ideally in the same availability domain as your NAT gateway. This can reduce latency on the initial origin fetch.
+
+Pre-warm before scaling. If you know a new model version is coming, kick off a dfget on the seed peer before you scale up the GPU node pool. By the time new nodes come online, the model’s already cached in the P2P mesh and distribution is much faster.
+
+Pin your revisions. In production inference, always pin model versions (--hf-revision or --ms-revision). Every node in the cluster needs to serve the exact same weights, and you don’t want to debug a mismatch at 2 AM.
+Connection to Oracle University Training
+
+If you’re working through OCI training on Oracle University, a lot of this maps directly to what you’re studying:
+
+The relevant Oracle University learning paths are OCI Architect Professional, OCI Architect Associate, OCI DevOps Professional, OCI Networking Professional, OCI Observability Professional, OCI AI Foundations, and OCI Enterprise AI Professional. The Architect and Networking paths cover the multicloud networking, VCN, and service gateway concepts behind reducing cross-cloud egress and supporting the private access patterns above. DevOps and Observability cover the Kubernetes, Helm, and monitoring patterns that underpin running Dragonfly. AI Foundations and Enterprise AI provide the AI workload context that makes this infrastructure relevant.
+
+Deploying Dragonfly on OKE is a solid hands-on exercise if you’re prepping for any of these certs, since it ties together networking, Kubernetes, and AI infrastructure in one project. You can browse the full catalog and enroll in these paths on Oracle MyLearn.
+Try It Yourself
+
+    Spin up an OKE cluster with a GPU node pool (even a single A10 works for testing).
+    Install Dragonfly via Helm.
+    Run dfget hf://deepseek-ai/DeepSeek-R1/config.json -O /tmp/config.json and watch the P2P logs.
+    Scale to a second node, repeat the download, and watch the cache hit.
+
+Model checkpoints and cluster sizes keep growing. Running Dragonfly on OKE helps keep the distribution layer from becoming the bottleneck as they grow
+
+Courses at Oracle University:
+
+https://mylearn.oracle.com/ou/learning-path/become-an-oracle-cloud-infrastructure-networking-professional-2026/163340
+
+https://mylearn.oracle.com/ou/learning-path/become-an-oci-architect-associate-2026/162234
+
+http://mylearn.oracle.com/ou/learning-path/become-an-oci-devops-professional-2026/162852
+
+https://mylearn.oracle.com/ou/learning-path/become-an-oracle-cloud-infrastructure-observability-professional-2026/162237
+
+https://mylearn.oracle.com/ou/learning-path/become-an-oci-ai-foundations-associate-free/163615
+
+https://mylearn.oracle.com/ou/learning-path/become-an-oracle-agentic-ai-foundations-associate-2026/163239

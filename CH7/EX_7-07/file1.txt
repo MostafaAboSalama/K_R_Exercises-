@@ -1,0 +1,57 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define LINES_PER_PAGE 		50   
+void filecopy(FILE* ifp, FILE* ofp);
+
+int main(int argc, char *argv[])
+{
+    FILE* fp;
+    
+    if(argc == 1)
+    {
+		fprintf();
+		exit(1);
+	}
+	else
+	{
+		while(--argc > 0)
+		{
+			if ((fp = fopen(*++argv, "r")) == NULL)
+			{
+				fprintf();
+				exit(2);
+			}
+			else
+			{
+				printf("=====================================\n");
+				printf("File: %s\n", *argv);
+				filecopy(fp, stdout);
+				fclose(fp);
+			}
+		}
+	}
+    return 0;
+}
+
+void filecopy(FILE* ifp, FILE* ofp)
+{
+	int c;	
+	int line_cnt = 1;
+    int page_cnt = 1;
+	while((c = getc(ifp)) != EOF)
+	{
+		printf("Page: %d\n", page_cnt);
+		printf("=====================================\n");
+		putc(c, ofp);
+		if(c == '\n')
+			line_cnt++;
+		if(line_cnt == LINES_PER_PAGE)
+		{
+			page_cnt++;
+			line_cnt = 0;
+		}
+	}
+}
+
